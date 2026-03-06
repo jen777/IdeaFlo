@@ -12,23 +12,18 @@ IdeaFlo is a small MVP to manage ideas and attached documents/reports.
 
 ## Stack
 
-- **Backend:** Node.js + Express + pg + multer
+- **Backend:** Node.js + Express + PostgreSQL
 - **Frontend:** Static HTML/JS app served by Nginx
-- **Infra:** Docker Compose + PostgreSQL
+- **Infra:** Docker Compose
 
 ## Repo + Tracking
 
 - GitHub repo: https://github.com/jen777/IdeaFlo
-- Node.js rewrite tracking issue: https://github.com/jen777/IdeaFlo/issues/5
-
-## Documentation
-
-- [docs/README.md](./docs/README.md)
-- [docs/TASKS.md](./docs/TASKS.md)
-- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
-- [docs/API.md](./docs/API.md)
-- [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)
-- [docs/TESTING.md](./docs/TESTING.md)
+- Issues:
+  - Plan: https://github.com/jen777/IdeaFlo/issues/1
+  - Backend: https://github.com/jen777/IdeaFlo/issues/2
+  - Frontend: https://github.com/jen777/IdeaFlo/issues/3
+  - DevOps/GHCR: https://github.com/jen777/IdeaFlo/issues/4
 
 ## Quick Start
 
@@ -52,8 +47,6 @@ docker compose up --build -d
 
 ## Smoke Test
 
-### UI smoke test
-
 1. In UI, create an idea.
 2. Open the idea and edit fields, save.
 3. Upload a file under Documents.
@@ -61,14 +54,13 @@ docker compose up --build -d
 5. Delete document.
 6. Delete idea.
 
-### API smoke test
+Optional API smoke test:
 
 ```bash
 curl -s http://localhost:8000/health
 curl -s -X POST http://localhost:8000/ideas \
   -H 'Content-Type: application/json' \
   -d '{"title":"Test Idea","summary":"MVP test","status":"new","current_state":"draft","future_steps":"validate"}'
-curl -s http://localhost:8000/ideas
 ```
 
 ## Build + Push to GHCR
@@ -90,6 +82,8 @@ Published image names:
 
 - `ghcr.io/jen777/ideaflo-backend:latest`
 - `ghcr.io/jen777/ideaflo-frontend:latest`
+
+
 
 ## Deployment Verification (2026-03-06)
 

@@ -1,11 +1,10 @@
 {
   "name": "ideaflo-backend",
   "version": "1.0.0",
-  "description": "IdeaFlo Node.js + Express backend",
+  "private": true,
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "start": "node src/server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
