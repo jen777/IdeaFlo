@@ -83,3 +83,22 @@ Published image names:
 - `ghcr.io/jen777/ideaflo-backend:latest`
 - `ghcr.io/jen777/ideaflo-frontend:latest`
 
+
+
+## Deployment Verification (2026-03-06)
+
+Verified on VM with Docker Compose:
+
+- `docker compose push` completed successfully for backend/frontend GHCR images.
+- `docker compose ps` shows all services healthy/up:
+  - backend on `:8000`
+  - frontend on `:8080`
+  - postgres healthy
+
+Example status observed:
+
+```text
+ideaflo-backend-1   Up  (0.0.0.0:8000->8000)
+ideaflo-frontend-1  Up  (0.0.0.0:8080->80)
+ideaflo-postgres-1  Up (healthy)
+```
