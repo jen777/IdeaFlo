@@ -126,3 +126,19 @@ The frontend login form stores Basic auth in browser localStorage for API calls.
 - Users are stored in PostgreSQL (`users` table).
 - Login creates a DB-backed session token (`sessions` table).
 - API requires Bearer token for all protected routes.
+
+
+## API Tokens for AI Agents
+Each user can create personal API tokens from **Users** page.
+
+- UI: `/users.html` -> "API Tokens (for agents)"
+- Token is shown only once at creation.
+- Use token for API access with either:
+  - `Authorization: ApiToken <token>`
+  - `X-API-Token: <token>`
+
+Example:
+
+```bash
+curl -H "Authorization: ApiToken ifl_xxx" http://localhost:8000/ideas
+```

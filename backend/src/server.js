@@ -37,31 +37,72 @@ function verifyPassword(password, stored) {
   return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(check, 'hex'));
 }
 
+function sha256(text) {
+  return crypto.createHash('sha256').update(text).digest('hex');
+}
+
+function newApiToken() {
+  return `ifl_${crypto.randomBytes(32).toString('hex')}`;
+}
+
 function parseBearer(header = '') {
   if (!header.startsWith('Bearer ')) return null;
   return header.slice(7).trim() || null;
 }
 
+function parseApiToken(req) {
+  const fromHeader = req.headers['x-api-token'];
+  if (fromHeader) return String(fromHeader);
+  const auth = req.headers.authorization || '';
+  if (auth.startsWith('ApiToken ')) return auth.slice('ApiToken '.length).trim();
+  return null;
+}
+
 async function authMiddleware(req, res, next) {
   if (req.path === '/health' || req.path === '/auth/login') return next();
-  const token = parseBearer(req.headers.authorization || '');
-  if (!token) return res.status(401).json({ error: 'Unauthorized' });
 
-  const { rows } = await pool.query(
-    `SELECT s.id, s.user_id, s.expires_at, u.username
-     FROM sessions s
-     JOIN users u ON u.id = s.user_id
-     WHERE s.token = $1`,
-    [token]
-  );
-  if (!rows.length) return res.status(401).json({ error: 'Unauthorized' });
-  const s = rows[0];
-  if (new Date(s.expires_at) < new Date()) {
-    await pool.query('DELETE FROM sessions WHERE id=$1', [s.id]);
-    return res.status(401).json({ error: 'Session expired' });
+  const bearer = parseBearer(req.headers.authorization || '');
+  if (bearer) {
+    const { rows } = await pool.query(
+      `SELECT s.id, s.user_id, s.expires_at, u.username
+       FROM sessions s
+       JOIN users u ON u.id = s.user_id
+       WHERE s.token = $1`,
+      [bearer]
+    );
+    if (rows.length) {
+      const s = rows[0];
+      if (new Date(s.expires_at) >= new Date()) {
+        req.authUser = { id: s.user_id, username: s.username, token: bearer, authType: 'session' };
+        return next();
+      }
+      await pool.query('DELETE FROM sessions WHERE id=$1', [s.id]);
+    }
   }
-  req.authUser = { id: s.user_id, username: s.username, token };
-  next();
+
+  const rawApiToken = parseApiToken(req);
+  if (rawApiToken) {
+    const tokenHash = sha256(rawApiToken);
+    const { rows } = await pool.query(
+      `SELECT t.id, t.user_id, t.name, t.revoked_at, u.username
+       FROM api_tokens t
+       JOIN users u ON u.id = t.user_id
+       WHERE t.token_hash = $1`,
+      [tokenHash]
+    );
+    if (rows.length && !rows[0].revoked_at) {
+      await pool.query('UPDATE api_tokens SET last_used_at=NOW() WHERE id=$1', [rows[0].id]);
+      req.authUser = {
+        id: rows[0].user_id,
+        username: rows[0].username,
+        authType: 'api_token',
+        tokenName: rows[0].name,
+      };
+      return next();
+    }
+  }
+
+  return res.status(401).json({ error: 'Unauthorized' });
 }
 
 async function initDb() {
@@ -105,6 +146,18 @@ async function initDb() {
       expires_at TIMESTAMPTZ NOT NULL
     );
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS api_tokens (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      token_prefix TEXT NOT NULL,
+      token_hash TEXT UNIQUE NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_used_at TIMESTAMPTZ,
+      revoked_at TIMESTAMPTZ
+    );
+  `);
 
   const admin = await pool.query('SELECT id FROM users WHERE username=$1', [ADMIN_USERNAME]);
   if (!admin.rows.length) {
@@ -134,7 +187,9 @@ app.post('/auth/login', async (req, res) => {
 });
 
 app.post('/auth/logout', async (req, res) => {
-  await pool.query('DELETE FROM sessions WHERE token=$1', [req.authUser.token]);
+  if (req.authUser.authType === 'session') {
+    await pool.query('DELETE FROM sessions WHERE token=$1', [req.authUser.token]);
+  }
   res.status(204).send();
 });
 
@@ -169,6 +224,46 @@ app.delete('/users/:id', async (req, res) => {
   const { rowCount } = await pool.query('DELETE FROM users WHERE id=$1', [id]);
   if (!rowCount) return res.status(404).json({ error: 'not found' });
   await pool.query('DELETE FROM sessions WHERE user_id=$1', [id]);
+  await pool.query('DELETE FROM api_tokens WHERE user_id=$1', [id]);
+  res.status(204).send();
+});
+
+// API token management (per-user)
+app.get('/api-tokens', async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, name, token_prefix, created_at, last_used_at, revoked_at
+     FROM api_tokens WHERE user_id=$1 ORDER BY created_at DESC`,
+    [req.authUser.id]
+  );
+  res.json(rows);
+});
+
+app.post('/api-tokens', async (req, res) => {
+  const { name } = req.body || {};
+  const cleanName = (name || '').trim();
+  if (!cleanName) return res.status(400).json({ error: 'name is required' });
+
+  const plainToken = newApiToken();
+  const prefix = plainToken.slice(0, 12);
+  const tokenHash = sha256(plainToken);
+
+  const { rows } = await pool.query(
+    `INSERT INTO api_tokens (user_id, name, token_prefix, token_hash)
+     VALUES ($1,$2,$3,$4)
+     RETURNING id, name, token_prefix, created_at`,
+    [req.authUser.id, cleanName, prefix, tokenHash]
+  );
+
+  // Show plain token only once on creation
+  res.status(201).json({ ...rows[0], token: plainToken });
+});
+
+app.delete('/api-tokens/:id', async (req, res) => {
+  const { rowCount } = await pool.query(
+    'UPDATE api_tokens SET revoked_at=NOW() WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL',
+    [req.params.id, req.authUser.id]
+  );
+  if (!rowCount) return res.status(404).json({ error: 'not found' });
   res.status(204).send();
 });
 

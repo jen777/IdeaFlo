@@ -2,7 +2,7 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>User Management</title><link rel="stylesheet" href="/styles.css" />
 </head><body>
-<header><h1>IdeaFlo</h1><p>User management</p></header>
+<header><h1>IdeaFlo</h1><p>User management + API tokens for agents</p></header>
 <div id="nav"></div>
 <main>
 <section class="panel">
@@ -14,9 +14,20 @@
   </form>
   <div id="msg" class="small"></div>
 </section>
+
 <section class="panel">
   <h2>Users</h2>
   <div id="users-list"></div>
+</section>
+
+<section class="panel">
+  <h2>API Tokens (for agents)</h2>
+  <form id="create-token-form">
+    <label>Token Name <input name="name" placeholder="e.g. Claude Agent" required /></label>
+    <button type="submit">Create Token</button>
+  </form>
+  <div id="new-token" class="small"></div>
+  <div id="tokens-list"></div>
 </section>
 </main>
 <script src="/common.js"></script>
