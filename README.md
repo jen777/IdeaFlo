@@ -114,3 +114,15 @@ AUTH_PASSWORD=change-me
 ```
 
 The frontend login form stores Basic auth in browser localStorage for API calls.
+
+
+## Pages
+- `/login.html` — login with DB user credentials
+- `/ideas.html` — view and manage ideas/documents
+- `/create-idea.html` — create ideas
+- `/users.html` — user management (create/delete users)
+
+## Auth model
+- Users are stored in PostgreSQL (`users` table).
+- Login creates a DB-backed session token (`sessions` table).
+- API requires Bearer token for all protected routes.

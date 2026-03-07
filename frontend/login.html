@@ -1,0 +1,33 @@
+<!doctype html><html><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>IdeaFlo Login</title><link rel="stylesheet" href="/styles.css" />
+</head><body>
+<header><h1>IdeaFlo</h1><p>Login</p></header>
+<main>
+  <section class="panel single">
+    <h2>Sign in</h2>
+    <form id="login-form">
+      <label>Username <input name="username" required /></label>
+      <label>Password <input name="password" type="password" required /></label>
+      <button type="submit">Login</button>
+    </form>
+    <div id="msg" class="small"></div>
+  </section>
+</main>
+<script src="/common.js"></script>
+<script>
+if (localStorage.getItem('ideaflo_token')) location.href='/ideas.html';
+document.getElementById('login-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const body = { username: fd.get('username'), password: fd.get('password') };
+  try {
+    const r = await fetch(`${API_BASE}/auth/login`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'Login failed');
+    localStorage.setItem('ideaflo_token', j.token);
+    location.href='/ideas.html';
+  } catch(err) { document.getElementById('msg').textContent = err.message; }
+};
+</script>
+</body></html>

@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
+const crypto = require('crypto');
 const { Pool } = require('pg');
 
 const app = express();
@@ -11,8 +12,9 @@ app.use(express.json());
 const PORT = process.env.PORT || 8000;
 const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://ideaflo:ideaflo@postgres:5432/ideaflo';
 const FILE_STORAGE_PATH = process.env.FILE_STORAGE_PATH || '/app/data';
-const AUTH_USERNAME = process.env.AUTH_USERNAME || 'admin';
-const AUTH_PASSWORD = process.env.AUTH_PASSWORD || 'admin123';
+const ADMIN_USERNAME = process.env.AUTH_USERNAME || 'admin';
+const ADMIN_PASSWORD = process.env.AUTH_PASSWORD || 'admin123';
+const SESSION_TTL_HOURS = Number(process.env.SESSION_TTL_HOURS || 72);
 
 fs.mkdirSync(FILE_STORAGE_PATH, { recursive: true });
 const pool = new Pool({ connectionString: DATABASE_URL });
@@ -23,30 +25,44 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-function parseBasicAuth(header = '') {
-  if (!header.startsWith('Basic ')) return null;
-  const b64 = header.slice(6);
-  try {
-    const raw = Buffer.from(b64, 'base64').toString('utf8');
-    const idx = raw.indexOf(':');
-    if (idx === -1) return null;
-    return { username: raw.slice(0, idx), password: raw.slice(idx + 1) };
-  } catch {
-    return null;
-  }
+function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
 }
 
-function authMiddleware(req, res, next) {
+function verifyPassword(password, stored) {
+  if (!stored || !stored.includes(':')) return false;
+  const [salt, hash] = stored.split(':');
+  const check = crypto.scryptSync(password, salt, 64).toString('hex');
+  return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(check, 'hex'));
+}
+
+function parseBearer(header = '') {
+  if (!header.startsWith('Bearer ')) return null;
+  return header.slice(7).trim() || null;
+}
+
+async function authMiddleware(req, res, next) {
   if (req.path === '/health' || req.path === '/auth/login') return next();
-  const parsed = parseBasicAuth(req.headers.authorization || '');
-  if (!parsed || parsed.username !== AUTH_USERNAME || parsed.password !== AUTH_PASSWORD) {
-    res.setHeader('WWW-Authenticate', 'Basic realm="IdeaFlo"');
-    return res.status(401).json({ error: 'Unauthorized' });
+  const token = parseBearer(req.headers.authorization || '');
+  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { rows } = await pool.query(
+    `SELECT s.id, s.user_id, s.expires_at, u.username
+     FROM sessions s
+     JOIN users u ON u.id = s.user_id
+     WHERE s.token = $1`,
+    [token]
+  );
+  if (!rows.length) return res.status(401).json({ error: 'Unauthorized' });
+  const s = rows[0];
+  if (new Date(s.expires_at) < new Date()) {
+    await pool.query('DELETE FROM sessions WHERE id=$1', [s.id]);
+    return res.status(401).json({ error: 'Session expired' });
   }
+  req.authUser = { id: s.user_id, username: s.username, token };
   next();
 }
-
-app.use(authMiddleware);
 
 async function initDb() {
   await pool.query(`
@@ -72,18 +88,91 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token TEXT UNIQUE NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL
+    );
+  `);
+
+  const admin = await pool.query('SELECT id FROM users WHERE username=$1', [ADMIN_USERNAME]);
+  if (!admin.rows.length) {
+    await pool.query('INSERT INTO users (username, password_hash) VALUES ($1, $2)', [
+      ADMIN_USERNAME,
+      hashPassword(ADMIN_PASSWORD),
+    ]);
+    console.log(`Bootstrapped admin user: ${ADMIN_USERNAME}`);
+  }
 }
+
+app.use(authMiddleware);
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
-app.post('/auth/login', (req, res) => {
+app.post('/auth/login', async (req, res) => {
   const { username, password } = req.body || {};
-  if (username === AUTH_USERNAME && password === AUTH_PASSWORD) {
-    return res.json({ ok: true });
+  if (!username || !password) return res.status(400).json({ error: 'username/password required' });
+  const { rows } = await pool.query('SELECT id, username, password_hash FROM users WHERE username=$1', [username]);
+  if (!rows.length || !verifyPassword(password, rows[0].password_hash)) {
+    return res.status(401).json({ error: 'Invalid credentials' });
   }
-  return res.status(401).json({ ok: false, error: 'Invalid credentials' });
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + SESSION_TTL_HOURS * 3600 * 1000);
+  await pool.query('INSERT INTO sessions (user_id, token, expires_at) VALUES ($1,$2,$3)', [rows[0].id, token, expiresAt]);
+  res.json({ token, user: { id: rows[0].id, username: rows[0].username }, expires_at: expiresAt.toISOString() });
 });
 
+app.post('/auth/logout', async (req, res) => {
+  await pool.query('DELETE FROM sessions WHERE token=$1', [req.authUser.token]);
+  res.status(204).send();
+});
+
+app.get('/auth/me', async (req, res) => {
+  res.json({ user: req.authUser });
+});
+
+// User management
+app.get('/users', async (_req, res) => {
+  const { rows } = await pool.query('SELECT id, username, created_at FROM users ORDER BY username');
+  res.json(rows);
+});
+
+app.post('/users', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: 'username/password required' });
+  try {
+    const { rows } = await pool.query(
+      'INSERT INTO users (username, password_hash) VALUES ($1,$2) RETURNING id, username, created_at',
+      [username.trim(), hashPassword(password)]
+    );
+    res.status(201).json(rows[0]);
+  } catch (e) {
+    if (String(e.message).toLowerCase().includes('unique')) return res.status(409).json({ error: 'username exists' });
+    throw e;
+  }
+});
+
+app.delete('/users/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (id === req.authUser.id) return res.status(400).json({ error: 'Cannot delete current user' });
+  const { rowCount } = await pool.query('DELETE FROM users WHERE id=$1', [id]);
+  if (!rowCount) return res.status(404).json({ error: 'not found' });
+  await pool.query('DELETE FROM sessions WHERE user_id=$1', [id]);
+  res.status(204).send();
+});
+
+// Ideas
 app.get('/ideas', async (_req, res) => {
   const { rows } = await pool.query('SELECT * FROM ideas ORDER BY updated_at DESC');
   res.json(rows);
@@ -126,6 +215,7 @@ app.delete('/ideas/:id', async (req, res) => {
   res.status(204).send();
 });
 
+// Documents
 app.get('/ideas/:id/documents', async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM documents WHERE idea_id=$1 ORDER BY created_at DESC', [req.params.id]);
   res.json(rows);

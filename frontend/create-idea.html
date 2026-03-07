@@ -1,0 +1,23 @@
+<!doctype html><html><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Create Idea</title><link rel="stylesheet" href="/styles.css" />
+</head><body>
+<header><h1>IdeaFlo</h1><p>Create new idea</p></header>
+<div id="nav"></div>
+<main>
+<section class="panel single">
+  <h2>Create Idea</h2>
+  <form id="create-idea-form">
+    <label>Title <input name="title" required /></label>
+    <label>Summary <textarea name="summary"></textarea></label>
+    <label>Status <input name="status" value="new" /></label>
+    <label>Current State <textarea name="current_state"></textarea></label>
+    <label>Future Steps <textarea name="future_steps"></textarea></label>
+    <button type="submit">Create</button>
+  </form>
+  <div id="msg" class="small"></div>
+</section>
+</main>
+<script src="/common.js"></script>
+<script src="/create-idea.js"></script>
+</body></html>
