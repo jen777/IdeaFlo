@@ -13,6 +13,17 @@
   </header>
 
   <main>
+    <section class="panel" id="auth-panel">
+      <h2>Login</h2>
+      <form id="login-form" class="row">
+        <input name="username" placeholder="Username" required />
+        <input name="password" type="password" placeholder="Password" required />
+        <button type="submit">Sign in</button>
+        <button type="button" id="logout-btn" class="danger">Logout</button>
+      </form>
+      <div id="auth-status" class="small">Not authenticated</div>
+    </section>
+
     <section class="panel">
       <h2>Create Idea</h2>
       <form id="create-idea-form">

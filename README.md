@@ -102,3 +102,15 @@ ideaflo-backend-1   Up  (0.0.0.0:8000->8000)
 ideaflo-frontend-1  Up  (0.0.0.0:8080->80)
 ideaflo-postgres-1  Up (healthy)
 ```
+
+
+## Authentication
+IdeaFlo now uses simple login/password authentication (HTTP Basic) at backend API level.
+Set in `.env`:
+
+```
+AUTH_USERNAME=admin
+AUTH_PASSWORD=change-me
+```
+
+The frontend login form stores Basic auth in browser localStorage for API calls.

@@ -1,14 +1,31 @@
 const API_BASE = 'https://ideaflo-api.apps.vershynin.if.ua';
 
 let selectedIdeaId = null;
+let authHeader = localStorage.getItem('ideaflo_auth') || '';
 
 const ideasList = document.getElementById('ideas-list');
 const docsList = document.getElementById('docs-list');
 const detailPanel = document.getElementById('detail-panel');
+const authStatus = document.getElementById('auth-status');
+
+function setAuthStatus() {
+  authStatus.textContent = authHeader ? 'Authenticated' : 'Not authenticated';
+}
+setAuthStatus();
+
+function withAuthHeaders(headers = {}) {
+  const h = { ...headers };
+  if (authHeader) h.Authorization = authHeader;
+  return h;
+}
 
 async function api(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, options);
+  const opts = { ...options, headers: withAuthHeaders(options.headers || {}) };
+  const res = await fetch(`${API_BASE}${path}`, opts);
   if (!res.ok) {
+    if (res.status === 401) {
+      throw new Error('Unauthorized. Please login.');
+    }
     const text = await res.text();
     throw new Error(text || `Request failed: ${res.status}`);
   }
@@ -16,7 +33,24 @@ async function api(path, options = {}) {
   return ct.includes('application/json') ? res.json() : res;
 }
 
+async function verifyLogin(username, password) {
+  const hdr = 'Basic ' + btoa(`${username}:${password}`);
+  const res = await fetch(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) throw new Error('Invalid login/password');
+  authHeader = hdr;
+  localStorage.setItem('ideaflo_auth', authHeader);
+  setAuthStatus();
+}
+
 async function loadIdeas() {
+  if (!authHeader) {
+    ideasList.textContent = 'Please login first.';
+    return;
+  }
   const ideas = await api('/ideas');
   ideasList.innerHTML = '';
 
@@ -55,6 +89,22 @@ async function selectIdea(id) {
   await loadDocuments();
 }
 
+async function downloadDocument(docId, filename) {
+  const res = await fetch(`${API_BASE}/ideas/${selectedIdeaId}/documents/${docId}/download`, {
+    headers: withAuthHeaders(),
+  });
+  if (!res.ok) throw new Error('Download failed');
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 async function loadDocuments() {
   if (!selectedIdeaId) return;
   const docs = await api(`/ideas/${selectedIdeaId}/documents`);
@@ -75,8 +125,8 @@ async function loadDocuments() {
         <button class="danger delete">Delete</button>
       </div>
     `;
-    div.querySelector('.download').onclick = () => {
-      window.open(`${API_BASE}/ideas/${selectedIdeaId}/documents/${doc.id}/download`, '_blank');
+    div.querySelector('.download').onclick = async () => {
+      await downloadDocument(doc.id, doc.filename);
     };
     div.querySelector('.delete').onclick = async () => {
       if (!confirm('Delete this document?')) return;
@@ -86,6 +136,28 @@ async function loadDocuments() {
     docsList.appendChild(div);
   });
 }
+
+document.getElementById('login-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  try {
+    await verifyLogin(form.username.value, form.password.value);
+    form.password.value = '';
+    await loadIdeas();
+  } catch (err) {
+    alert(err.message);
+  }
+};
+
+document.getElementById('logout-btn').onclick = () => {
+  authHeader = '';
+  localStorage.removeItem('ideaflo_auth');
+  selectedIdeaId = null;
+  detailPanel.hidden = true;
+  docsList.innerHTML = '';
+  setAuthStatus();
+  ideasList.textContent = 'Please login first.';
+};
 
 document.getElementById('create-idea-form').onsubmit = async (e) => {
   e.preventDefault();
@@ -140,6 +212,10 @@ document.getElementById('upload-form').onsubmit = async (e) => {
   await loadDocuments();
 };
 
-loadIdeas().catch((err) => {
-  ideasList.innerHTML = `Error loading ideas: ${err.message}`;
-});
+if (authHeader) {
+  loadIdeas().catch((err) => {
+    ideasList.innerHTML = `Error loading ideas: ${err.message}`;
+  });
+} else {
+  ideasList.textContent = 'Please login first.';
+}

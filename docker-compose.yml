@@ -19,6 +19,8 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       FILE_STORAGE_PATH: "/app/data"
+      AUTH_USERNAME: ${AUTH_USERNAME:-admin}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:-admin123}
     volumes:
       - docs_data:/app/data
     depends_on:

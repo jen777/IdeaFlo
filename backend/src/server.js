@@ -2,7 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
-const path = require('path');
 const { Pool } = require('pg');
 
 const app = express();
@@ -11,9 +10,11 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8000;
 const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://ideaflo:ideaflo@postgres:5432/ideaflo';
-const FILE_STORAGE_PATH = process.env.FILE_STORAGE_PATH || '/data/docs';
-fs.mkdirSync(FILE_STORAGE_PATH, { recursive: true });
+const FILE_STORAGE_PATH = process.env.FILE_STORAGE_PATH || '/app/data';
+const AUTH_USERNAME = process.env.AUTH_USERNAME || 'admin';
+const AUTH_PASSWORD = process.env.AUTH_PASSWORD || 'admin123';
 
+fs.mkdirSync(FILE_STORAGE_PATH, { recursive: true });
 const pool = new Pool({ connectionString: DATABASE_URL });
 
 const storage = multer.diskStorage({
@@ -21,6 +22,31 @@ const storage = multer.diskStorage({
   filename: (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`),
 });
 const upload = multer({ storage });
+
+function parseBasicAuth(header = '') {
+  if (!header.startsWith('Basic ')) return null;
+  const b64 = header.slice(6);
+  try {
+    const raw = Buffer.from(b64, 'base64').toString('utf8');
+    const idx = raw.indexOf(':');
+    if (idx === -1) return null;
+    return { username: raw.slice(0, idx), password: raw.slice(idx + 1) };
+  } catch {
+    return null;
+  }
+}
+
+function authMiddleware(req, res, next) {
+  if (req.path === '/health' || req.path === '/auth/login') return next();
+  const parsed = parseBasicAuth(req.headers.authorization || '');
+  if (!parsed || parsed.username !== AUTH_USERNAME || parsed.password !== AUTH_PASSWORD) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="IdeaFlo"');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
+
+app.use(authMiddleware);
 
 async function initDb() {
   await pool.query(`
@@ -49,6 +75,14 @@ async function initDb() {
 }
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
+app.post('/auth/login', (req, res) => {
+  const { username, password } = req.body || {};
+  if (username === AUTH_USERNAME && password === AUTH_PASSWORD) {
+    return res.json({ ok: true });
+  }
+  return res.status(401).json({ ok: false, error: 'Invalid credentials' });
+});
 
 app.get('/ideas', async (_req, res) => {
   const { rows } = await pool.query('SELECT * FROM ideas ORDER BY updated_at DESC');
