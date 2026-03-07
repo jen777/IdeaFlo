@@ -18,9 +18,9 @@ services:
     image: ghcr.io/jen777/ideaflo-backend:latest
     environment:
       DATABASE_URL: ${DATABASE_URL}
-      FILE_STORAGE_PATH: ${FILE_STORAGE_PATH}
+      FILE_STORAGE_PATH: "/home/jen777/data/"
     volumes:
-      - docs_data:${FILE_STORAGE_PATH}
+      - /home/jen777/data/:/home/jen777/data/
     depends_on:
       postgres:
         condition: service_healthy
@@ -37,4 +37,3 @@ services:
 
 volumes:
   postgres_data:
-  docs_data:
