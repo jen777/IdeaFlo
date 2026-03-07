@@ -1,6 +1,4 @@
-const API_BASE = window.location.hostname === 'localhost'
-  ? 'http://localhost:8000'
-  : `${window.location.protocol}//${window.location.hostname}:8000`;
+const API_BASE = 'https://ideaflo-api.apps.vershynin.if.ua';
 
 let selectedIdeaId = null;
 
