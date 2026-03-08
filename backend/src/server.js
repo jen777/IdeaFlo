@@ -58,6 +58,16 @@ function parseApiToken(req) {
   return null;
 }
 
+function isWriteMethod(method) {
+  return !['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase());
+}
+
+function normalizeScope(input) {
+  const v = String(input || '').toLowerCase().trim();
+  if (v === 'read' || v === 'write') return v;
+  return 'write';
+}
+
 async function authMiddleware(req, res, next) {
   if (req.path === '/health' || req.path === '/auth/login') return next();
 
@@ -84,19 +94,27 @@ async function authMiddleware(req, res, next) {
   if (rawApiToken) {
     const tokenHash = sha256(rawApiToken);
     const { rows } = await pool.query(
-      `SELECT t.id, t.user_id, t.name, t.revoked_at, u.username
+      `SELECT t.id, t.user_id, t.name, t.scope, t.expires_at, t.revoked_at, u.username
        FROM api_tokens t
        JOIN users u ON u.id = t.user_id
        WHERE t.token_hash = $1`,
       [tokenHash]
     );
-    if (rows.length && !rows[0].revoked_at) {
-      await pool.query('UPDATE api_tokens SET last_used_at=NOW() WHERE id=$1', [rows[0].id]);
+
+    if (rows.length) {
+      const t = rows[0];
+      if (t.revoked_at) return res.status(401).json({ error: 'Token revoked' });
+      if (t.expires_at && new Date(t.expires_at) < new Date()) return res.status(401).json({ error: 'Token expired' });
+      if (normalizeScope(t.scope) === 'read' && isWriteMethod(req.method)) {
+        return res.status(403).json({ error: 'Token scope does not allow write operations' });
+      }
+      await pool.query('UPDATE api_tokens SET last_used_at=NOW() WHERE id=$1', [t.id]);
       req.authUser = {
-        id: rows[0].user_id,
-        username: rows[0].username,
+        id: t.user_id,
+        username: t.username,
         authType: 'api_token',
-        tokenName: rows[0].name,
+        tokenName: t.name,
+        tokenScope: normalizeScope(t.scope),
       };
       return next();
     }
@@ -153,11 +171,17 @@ async function initDb() {
       name TEXT NOT NULL,
       token_prefix TEXT NOT NULL,
       token_hash TEXT UNIQUE NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'write',
+      expires_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       last_used_at TIMESTAMPTZ,
       revoked_at TIMESTAMPTZ
     );
   `);
+
+  // Migration safety for older tables
+  await pool.query(`ALTER TABLE api_tokens ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'write'`);
+  await pool.query(`ALTER TABLE api_tokens ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ`);
 
   const admin = await pool.query('SELECT id FROM users WHERE username=$1', [ADMIN_USERNAME]);
   if (!admin.rows.length) {
@@ -231,7 +255,7 @@ app.delete('/users/:id', async (req, res) => {
 // API token management (per-user)
 app.get('/api-tokens', async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, name, token_prefix, created_at, last_used_at, revoked_at
+    `SELECT id, name, token_prefix, scope, expires_at, created_at, last_used_at, revoked_at
      FROM api_tokens WHERE user_id=$1 ORDER BY created_at DESC`,
     [req.authUser.id]
   );
@@ -239,19 +263,27 @@ app.get('/api-tokens', async (req, res) => {
 });
 
 app.post('/api-tokens', async (req, res) => {
-  const { name } = req.body || {};
+  const { name, scope, expires_at } = req.body || {};
   const cleanName = (name || '').trim();
+  const cleanScope = normalizeScope(scope);
   if (!cleanName) return res.status(400).json({ error: 'name is required' });
+
+  let expiresAt = null;
+  if (expires_at) {
+    const d = new Date(expires_at);
+    if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'invalid expires_at' });
+    expiresAt = d;
+  }
 
   const plainToken = newApiToken();
   const prefix = plainToken.slice(0, 12);
   const tokenHash = sha256(plainToken);
 
   const { rows } = await pool.query(
-    `INSERT INTO api_tokens (user_id, name, token_prefix, token_hash)
-     VALUES ($1,$2,$3,$4)
-     RETURNING id, name, token_prefix, created_at`,
-    [req.authUser.id, cleanName, prefix, tokenHash]
+    `INSERT INTO api_tokens (user_id, name, token_prefix, token_hash, scope, expires_at)
+     VALUES ($1,$2,$3,$4,$5,$6)
+     RETURNING id, name, token_prefix, scope, expires_at, created_at`,
+    [req.authUser.id, cleanName, prefix, tokenHash, cleanScope, expiresAt]
   );
 
   // Show plain token only once on creation

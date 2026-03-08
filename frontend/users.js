@@ -24,7 +24,8 @@ async function loadTokens(){
   tokens.forEach(t=>{
     const d=document.createElement('div'); d.className='idea-item';
     const revoked=t.revoked_at ? `revoked at ${new Date(t.revoked_at).toLocaleString()}` : 'active';
-    d.innerHTML=`<strong>${t.name}</strong><div class='small'>prefix: ${t.token_prefix}... | ${revoked}</div><button class='danger'>Revoke</button>`;
+    const exp=t.expires_at ? `expires ${new Date(t.expires_at).toLocaleString()}` : 'no expiry';
+    d.innerHTML=`<strong>${t.name}</strong><div class='small'>prefix: ${t.token_prefix}... | scope: ${t.scope} | ${exp} | ${revoked}</div><button class='danger'>Revoke</button>`;
     d.querySelector('button').onclick=async()=>{ if(confirm(`Revoke token ${t.name}?`)){ await api(`/api-tokens/${t.id}`,{method:'DELETE'}); await loadTokens(); }};
     tokensList.appendChild(d);
   });
@@ -42,6 +43,7 @@ document.getElementById('create-user-form').onsubmit=async(e)=>{
 document.getElementById('create-token-form').onsubmit=async(e)=>{
   e.preventDefault();
   const payload=Object.fromEntries(new FormData(e.target).entries());
+  if (!payload.expires_at) delete payload.expires_at; else payload.expires_at = new Date(payload.expires_at).toISOString();
   try {
     const created = await api('/api-tokens',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     e.target.reset();

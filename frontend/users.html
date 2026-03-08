@@ -24,6 +24,13 @@
   <h2>API Tokens (for agents)</h2>
   <form id="create-token-form">
     <label>Token Name <input name="name" placeholder="e.g. Claude Agent" required /></label>
+    <label>Scope
+      <select name="scope">
+        <option value="write">write (read+write)</option>
+        <option value="read">read-only</option>
+      </select>
+    </label>
+    <label>Expires At (optional) <input name="expires_at" type="datetime-local" /></label>
     <button type="submit">Create Token</button>
   </form>
   <div id="new-token" class="small"></div>
